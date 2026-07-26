@@ -1,0 +1,323 @@
+package com.example.karaoke
+
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
+import android.widget.Toast
+import android.widget.VideoView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.content.ContextCompat
+import java.io.File
+import java.io.BufferedReader
+import java.io.InputStreamReader
+
+enum class Screen {
+    Search, Player, Score
+}
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MaterialTheme {
+                // Vai direto para o app sem travar a tela!
+                KaraokeTvScreen()
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun VerificarEPrepararPermissoes(onPermissaoConcedida: @Composable () -> Unit) {
+    val context = LocalContext.current
+
+    // Determina a permissão correta dependendo da versão do Android
+    val permissaoNecessaria = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        Manifest.permission.READ_MEDIA_VIDEO
+    } else {
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+
+    var temPermissao by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, permissaoNecessaria) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { concedida ->
+        temPermissao = concedida
+        if (!concedida) {
+            Toast.makeText(context, "Aviso: Sem permissão, o app não lerá o Pendrive!", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        if (!temPermissao) {
+            launcher.launch(permissaoNecessaria)
+        }
+    }
+
+    if (temPermissao) {
+        onPermissaoConcedida()
+    } else {
+        // Tela de espera caso a permissão ainda não tenha sido dada
+        Box(
+            modifier = Modifier.fillMaxSize().background(Color(0xFF121214)),
+            contentAlignment = Alignment.Center
+        ) {
+            Text("Aguardando permissão de armazenamento...", color = Color.White, fontSize = 18.sp)
+        }
+    }
+}
+
+@Composable
+fun KaraokeTvScreen() {
+    val context = LocalContext.current
+    var currentScreen by remember { mutableStateOf(Screen.Search) }
+    var videoPathToPlay by remember { mutableStateOf("") }
+    var ultimaNota by remember { mutableStateOf(0) }
+    var mensagemNota by remember { mutableStateOf("") }
+
+    val backgroundColor = Color(0xFF121214)
+    val primaryColor = Color(0xFFE91E63)
+
+    Box(
+        modifier = Modifier.fillMaxSize().background(backgroundColor),
+        contentAlignment = Alignment.Center
+    ) {
+        when (currentScreen) {
+            Screen.Search -> {
+                SearchScreen(
+                    primaryColor = primaryColor,
+                    onMusicFound = { path ->
+                        videoPathToPlay = path
+                        currentScreen = Screen.Player
+                    },
+                    onMusicNotFound = {
+                        Toast.makeText(context, "Vídeo não encontrado no Pendrive ou Memória!", Toast.LENGTH_LONG).show()
+                    }
+                )
+            }
+            Screen.Player -> {
+                BackHandler {
+                    currentScreen = Screen.Search
+                }
+
+                VideoPlayerScreen(
+                    videoPath = videoPathToPlay,
+                    onVideoFinished = {
+                        ultimaNota = (70..100).random()
+                        mensagemNota = when {
+                            ultimaNota >= 95 -> "Incrível! Você é um popstar! 🌟🎤"
+                            ultimaNota >= 85 -> "Show de bola! Cantou muito! 🏆"
+                            else -> "Mandou bem! Mas ainda pode melhorar. 🎤"
+                        }
+                        currentScreen = Screen.Score
+                    }
+                )
+            }
+            Screen.Score -> {
+                BackHandler {
+                    currentScreen = Screen.Search
+                }
+
+                ScoreScreen(
+                    nota = ultimaNota,
+                    mensagem = mensagemNota, // Nota: ajuste para mensagem conforme o erro anterior fixado
+                    primaryColor = primaryColor,
+                    onBackToSearch = { currentScreen = Screen.Search }
+                )
+            }
+        }
+    }
+}
+
+// O restante das funções de UI (SearchScreen, VideoPlayerScreen, ScoreScreen) permanecem estáveis...
+@Composable
+fun SearchScreen(primaryColor: Color, onMusicFound: (String) -> Unit, onMusicNotFound: () -> Unit) {
+    val context = LocalContext.current
+    var codigoMusica by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    fun executarBusca() {
+        if (codigoMusica.isNotBlank()) {
+            val path = buscarVideoPorNumero(context, codigoMusica)
+            if (path != null) {
+                onMusicFound(path)
+                codigoMusica = ""
+            } else {
+                onMusicNotFound()
+            }
+        }
+    }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center, modifier = Modifier.padding(24.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(text = "KARAOKÊ BOX", color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(text = "🎤", fontSize = 38.sp)
+        }
+        Spacer(modifier = Modifier.height(40.dp))
+        OutlinedTextField(
+            value = codigoMusica,
+            onValueChange = { codigoMusica = it },
+            label = { Text("Digite o Código da Música (ex: 1030)", color = Color.Gray) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = primaryColor, unfocusedBorderColor = Color.Gray,
+                focusedLabelColor = primaryColor, focusedTextColor = Color.White, unfocusedTextColor = Color.White
+            ),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Go),
+            keyboardActions = KeyboardActions(onGo = { executarBusca() }),
+            modifier = Modifier.fillMaxWidth(0.8f).focusRequester(focusRequester)
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        Button(onClick = { executarBusca() }, colors = ButtonDefaults.buttonColors(containerColor = primaryColor), modifier = Modifier.fillMaxWidth(0.5f).height(48.dp)) {
+            Text("Cantar!", fontSize = 18.sp, color = Color.White)
+        }
+    }
+}
+
+@Composable
+fun VideoPlayerScreen(videoPath: String, onVideoFinished: () -> Unit) {
+    var videoViewInstance by remember { mutableStateOf<VideoView?>(null) }
+
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { context ->
+                VideoView(context).apply {
+                    setVideoPath(videoPath)
+                    val mediaController = android.widget.MediaController(context)
+                    mediaController.setAnchorView(this)
+                    setMediaController(mediaController)
+                    setOnCompletionListener { onVideoFinished() }
+                    setOnErrorListener { _, _, _ ->
+                        Toast.makeText(context, "Erro ao reproduzir o arquivo local. Verifique o formato.", Toast.LENGTH_LONG).show()
+                        onVideoFinished()
+                        true
+                    }
+                    videoViewInstance = this
+                    start()
+                }
+            },
+            update = { videoView ->
+                videoView.setVideoPath(videoPath)
+                videoView.start()
+            }
+        )
+        DisposableEffect(Unit) {
+            onDispose { videoViewInstance?.stopPlayback() }
+        }
+    }
+}
+
+@Composable
+fun ScoreScreen(nota: Int, mensagem: String, primaryColor: Color, onBackToSearch: () -> Unit) {
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center, modifier = Modifier.padding(24.dp)) {
+        Text(text = "SUA NOTA:", color = Color.LightGray, fontSize = 24.sp)
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(text = "$nota", color = Color(0xFFFF5722), fontSize = 96.sp, fontWeight = FontWeight.Black)
+        Spacer(modifier = Modifier.height(24.dp))
+        Text(text = mensagem, color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 16.dp))
+        Spacer(modifier = Modifier.height(48.dp))
+        Button(onClick = onBackToSearch, colors = ButtonDefaults.buttonColors(containerColor = primaryColor), modifier = Modifier.focusRequester(focusRequester).height(48.dp)) {
+            Text("Cantar Outra! 🔄", fontSize = 16.sp, color = Color.White)
+        }
+    }
+}
+
+fun buscarVideoPorNumero(context: Context, numeroDigitated: String): String? {
+    try {
+        val inputStream = context.assets.open("musicas.txt")
+        val reader = BufferedReader(InputStreamReader(inputStream))
+        var linha: String?
+        var nomeDoArquivo: String? = null
+
+        while (reader.readLine().also { linha = it } != null) {
+            val partes = linha!!.split(",")
+            if (partes.size >= 3 && partes[0].trim() == numeroDigitated.trim()) {
+                nomeDoArquivo = partes[2].trim() // Ex: eduardo_e_monica.mp4
+                break
+            }
+        }
+        reader.close()
+
+        if (nomeDoArquivo != null) {
+            // Varre todos os volumes montados (/storage/emulated/0, /storage/XXXX-XXXX, etc.)
+            val caminhosPossiveis = mutableListOf<String>()
+
+            // Método 1: Através do sistema de arquivos do Android
+            val locaisDeArmazenamento = context.getExternalFilesDirs(null)
+            for (local in locaisDeArmazenamento) {
+                if (local != null) {
+                    val raiz = local.absolutePath.substringBefore("/Android/data/")
+                    caminhosPossiveis.add(raiz)
+                }
+            }
+
+            // Método 2: Caminhos universais conhecidos de TV Box e emuladores
+            caminhosPossiveis.add("/storage/emulated/0")
+            caminhosPossiveis.add("/mnt/sdcard")
+
+            // Varre o diretório nativo /storage/ onde os Pendrives via USB são listados
+            val storageDir = File("/storage")
+            if (storageDir.exists() && storageDir.isDirectory) {
+                storageDir.listFiles()?.forEach { file ->
+                    if (file.isDirectory && file.name != "emulated" && file.name != "self") {
+                        caminhosPossiveis.add(file.absolutePath)
+                    }
+                }
+            }
+
+            // Agora busca o arquivo dentro de cada uma das raizes encontradas
+            for (raiz in caminhosPossiveis.distinct()) {
+                // Teste 1: Solto na raiz
+                val f1 = File(raiz, nomeDoArquivo)
+                if (f1.exists()) return f1.absolutePath
+
+                // Teste 2: Na pasta KaraokeVideos
+                val f2 = File("$raiz/KaraokeVideos", nomeDoArquivo)
+                if (f2.exists()) return f2.absolutePath
+
+                // Teste 3: Na pasta Download
+                val f3 = File("$raiz/Download", nomeDoArquivo)
+                if (f3.exists()) return f3.absolutePath
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+    return null
+}

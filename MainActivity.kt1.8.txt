@@ -1,0 +1,325 @@
+package com.example.karaoke
+
+import android.content.Context
+import android.os.Bundle
+import android.widget.Toast
+import android.widget.VideoView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import java.io.BufferedReader
+import java.io.File
+import java.io.InputStreamReader
+
+// Estados de navegação do App
+enum class Screen {
+    Search, Player, Score
+}
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MaterialTheme {
+                KaraokeTvScreen()
+            }
+        }
+    }
+}
+
+@Composable
+fun KaraokeTvScreen() {
+    val context = LocalContext.current
+    var currentScreen by remember { mutableStateOf(Screen.Search) }
+    var videoPathToPlay by remember { mutableStateOf("") }
+    var ultimaNota by remember { mutableStateOf(0) }
+    var mensagemNota by remember { mutableStateOf("") }
+
+    // Cores escuras ideais para ambiente de TV
+    val backgroundColor = Color(0xFF121214)
+    val primaryColor = Color(0xFFE91E63) // Rosa vibrante para os botões
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundColor),
+        contentAlignment = Alignment.Center
+    ) {
+        when (currentScreen) {
+            Screen.Search -> {
+                SearchScreen(
+                    primaryColor = primaryColor,
+                    onMusicFound = { path ->
+                        videoPathToPlay = path
+                        currentScreen = Screen.Player
+                    },
+                    onMusicNotFound = {
+                        Toast.makeText(context, "Música não encontrada na pasta local!", Toast.LENGTH_LONG).show()
+                    }
+                )
+            }
+            Screen.Player -> {
+                // Captura o botão "Voltar" para fechar o player
+                BackHandler {
+                    currentScreen = Screen.Search
+                }
+
+                VideoPlayerScreen(
+                    videoPath = videoPathToPlay,
+                    onVideoFinished = {
+                        // Sorteia uma nota de 70 a 100 ao acabar o vídeo
+                        ultimaNota = (70..100).random()
+                        mensagemNota = when {
+                            ultimaNota >= 95 -> "Incrível! Você é um popstar! 🌟🎤"
+                            ultimaNota >= 85 -> "Show de bola! Cantou muito! 🏆"
+                            else -> "Mandou bem! Mas ainda pode melhorar. 🎤"
+                        }
+                        currentScreen = Screen.Score
+                    }
+                )
+            }
+            Screen.Score -> {
+                // Captura o botão "Voltar" na tela de nota
+                BackHandler {
+                    currentScreen = Screen.Search
+                }
+
+                ScoreScreen(
+                    nota = ultimaNota,
+                    mensagem = mensagemNota,
+                    primaryColor = primaryColor,
+                    onBackToSearch = {
+                        currentScreen = Screen.Search
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun SearchScreen(
+    primaryColor: Color,
+    onMusicFound: (String) -> Unit,
+    onMusicNotFound: () -> Unit
+) {
+    val context = LocalContext.current
+    var codigoMusica by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+
+    // Garante foco automático no campo de texto para uso com controle remoto
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    fun executarBusca() {
+        if (codigoMusica.isNotBlank()) {
+            val path = buscarVideoPorNumero(context, codigoMusica)
+            if (path != null) {
+                onMusicFound(path)
+                codigoMusica = "" // Limpa o campo para a próxima busca
+            } else {
+                onMusicNotFound()
+            }
+        }
+    }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier.padding(24.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = "KARAOKÊ BOX",
+                color = Color.White,
+                fontSize = 42.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(text = "🎤", fontSize = 38.sp)
+        }
+
+        Spacer(modifier = Modifier.height(40.dp))
+
+        OutlinedTextField(
+            value = codigoMusica,
+            onValueChange = { codigoMusica = it },
+            label = { Text("Digite o Código da Música (ex: 1030)", color = Color.Gray) },
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = primaryColor,
+                unfocusedBorderColor = Color.Gray,
+                focusedLabelColor = primaryColor,
+                focusedTextColor = Color.White,
+                unfocusedTextColor = Color.White
+            ),
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Go
+            ),
+            keyboardActions = KeyboardActions(
+                onGo = { executarBusca() }
+            ),
+            modifier = Modifier
+                .fillMaxWidth(0.8f)
+                .focusRequester(focusRequester)
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Button(
+            onClick = { executarBusca() },
+            colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+            modifier = Modifier
+                .fillMaxWidth(0.5f)
+                .height(48.dp)
+        ) {
+            Text("Cantar!", fontSize = 18.sp, color = Color.White)
+        }
+    }
+}
+
+@Composable
+fun VideoPlayerScreen(videoPath: String, onVideoFinished: () -> Unit) {
+    var videoViewInstance by remember { mutableStateOf<VideoView?>(null) }
+
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { context ->
+                VideoView(context).apply {
+                    setVideoPath(videoPath)
+                    
+                    val mediaController = android.widget.MediaController(context)
+                    mediaController.setAnchorView(this)
+                    setMediaController(mediaController)
+
+                    setOnCompletionListener {
+                        onVideoFinished()
+                    }
+
+                    setOnErrorListener { _, _, _ ->
+                        Toast.makeText(context, "Erro ao reproduzir o arquivo de vídeo.", Toast.LENGTH_LONG).show()
+                        onVideoFinished()
+                        true
+                    }
+
+                    videoViewInstance = this
+                    start()
+                }
+            },
+            update = { videoView ->
+                videoView.setVideoPath(videoPath)
+                videoView.start()
+            }
+        )
+
+        // Limpa o player ao sair da tela
+        DisposableEffect(Unit) {
+            onDispose {
+                videoViewInstance?.stopPlayback()
+            }
+        }
+    }
+}
+
+@Composable
+fun ScoreScreen(
+    nota: Int,
+    mensagem: String,
+    primaryColor: Color,
+    onBackToSearch: () -> Unit
+) {
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+        modifier = Modifier.padding(24.dp)
+    ) {
+        Text(text = "SUA NOTA:", color = Color.LightGray, fontSize = 24.sp)
+        
+        Spacer(modifier = Modifier.height(16.dp))
+        
+        Text(
+            text = "$nota",
+            color = Color(0xFFFF5722),
+            fontSize = 96.sp,
+            fontWeight = FontWeight.Black
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = mensagem,
+            color = Color.White,
+            fontSize = 22.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 16.dp)
+        )
+
+        Spacer(modifier = Modifier.height(48.dp))
+
+        Button(
+            onClick = onBackToSearch,
+            colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+            modifier = Modifier
+                .focusRequester(focusRequester)
+                .height(48.dp)
+        ) {
+            Text("Cantar Outra! 🔄", fontSize = 16.sp, color = Color.White)
+        }
+    }
+}
+
+fun buscarVideoPorNumero(context: Context, numeroDigitado: String): String? {
+    try {
+        val inputStream = context.assets.open("musicas.txt")
+        val reader = BufferedReader(InputStreamReader(inputStream))
+        var linha: String?
+        var nomeDoArquivo: String? = null
+        
+        // 1. Procura o nome do arquivo associado ao número no arquivo de texto
+        while (reader.readLine().also { linha = it } != null) {
+            val partes = linha!!.split(",")
+            if (partes.size >= 3 && partes[0].trim() == numeroDigitado.trim()) {
+                nomeDoArquivo = partes[2].trim()
+                break
+            }
+        }
+        reader.close()
+
+        // 2. Se achou no txt, verifica se o arquivo real existe na pasta de arquivos interna do app
+        if (nomeDoArquivo != null) {
+            val arquivoLocal = File(context.filesDir, nomeDoArquivo)
+            if (arquivoLocal.exists()) {
+                return arquivoLocal.absolutePath
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+    return null
+}

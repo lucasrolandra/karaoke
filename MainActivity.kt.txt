@@ -1,0 +1,326 @@
+package com.example.karaoke
+
+import android.content.Context
+import android.net.Uri
+import android.os.Bundle
+import android.widget.MediaController
+import android.widget.Toast
+import android.widget.VideoView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import java.io.BufferedReader
+import java.io.InputStreamReader
+
+// Define as telas disponíveis no fluxo do aplicativo
+sealed class Screen {
+    object Search : Screen()
+    data class Player(val videoUrl: String) : Screen()
+    data class Score(val points: Int) : Screen()
+}
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MaterialTheme {
+                MainKaraokeNavigation()
+            }
+        }
+    }
+}
+
+@Composable
+fun MainKaraokeNavigation() {
+    // Gerencia qual tela deve ser exibida na TV ou Celular
+    var currentScreen by remember { mutableStateOf<Screen>(Screen.Search) }
+
+    when (val screen = currentScreen) {
+        is Screen.Search -> {
+            KaraokeTvScreen(
+                onNavigateToPlayer = { url ->
+                    currentScreen = Screen.Player(url)
+                }
+            )
+        }
+        is Screen.Player -> {
+            // Se o usuário pressionar o botão "Voltar" do controle remoto, cancela o vídeo e volta à busca
+            BackHandler {
+                currentScreen = Screen.Search
+            }
+            VideoPlayerScreen(
+                videoUrl = screen.videoUrl,
+                onVideoFinished = {
+                    // Quando a música termina de rodar, sorteia uma nota entre 70 e 100 e vai para a tela de pontuação
+                    val randomScore = (70..100).random()
+                    currentScreen = Screen.Score(randomScore)
+                }
+            )
+        }
+        is Screen.Score -> {
+            // Se pressionar voltar na tela de pontuação, retorna ao buscador principal
+            BackHandler {
+                currentScreen = Screen.Search
+            }
+            ScoreScreen(
+                score = screen.points,
+                onRestart = {
+                    currentScreen = Screen.Search
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun KaraokeTvScreen(onNavigateToPlayer: (String) -> Unit) {
+    val context = LocalContext.current
+    var numeroMusica by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+
+    // Garante foco automático no campo de texto para facilitar o uso por controle remoto de TV Box
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    fun iniciarBuscaECanto() {
+        if (numeroMusica.isNotBlank()) {
+            val linkVideo = buscarVideoPorNumero(context, numeroMusica)
+            if (linkVideo != null) {
+                numeroMusica = "" // Limpa o campo numérico
+                onNavigateToPlayer(linkVideo)
+            } else {
+                Toast.makeText(context, "Música não encontrada! Digite 1010 ou 1020.", Toast.LENGTH_LONG).show()
+            }
+        } else {
+            Toast.makeText(context, "Por favor, digite o código da música.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF121212)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Text(
+                text = "KARAOKÊ BOX 🎤",
+                fontSize = 48.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+
+            Text(
+                text = "Digite o código da música e selecione cantar!",
+                fontSize = 18.sp,
+                color = Color.Gray,
+                modifier = Modifier.padding(bottom = 32.dp)
+            )
+
+            OutlinedTextField(
+                value = numeroMusica,
+                onValueChange = { input ->
+                    if (input.all { it.isDigit() } && input.length <= 4) {
+                        numeroMusica = input
+                    }
+                },
+                label = { Text("Código da Música (ex: 1010)", color = Color.Gray) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Go
+                ),
+                keyboardActions = KeyboardActions(
+                    onGo = { iniciarBuscaECanto() }
+                ),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color(0xFFE91E63),
+                    unfocusedBorderColor = Color.Gray,
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                ),
+                modifier = Modifier
+                    .width(400.dp)
+                    .focusRequester(focusRequester)
+            )
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            Button(
+                onClick = { iniciarBuscaECanto() },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63)),
+                modifier = Modifier.width(200.dp)
+            ) {
+                Text("Cantar! 🎶", fontSize = 20.sp, color = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+fun VideoPlayerScreen(videoUrl: String, onVideoFinished: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        contentAlignment = Alignment.Center
+    ) {
+        // O AndroidView permite integrar o componente nativo de reprodução de vídeo tradicional
+        AndroidView(
+            factory = { ctx ->
+                VideoView(ctx).apply {
+                    setVideoURI(Uri.parse(videoUrl))
+
+                    // Adiciona os botões clássicos de controle (Play, Pause, Barra de Progresso)
+                    val mediaController = MediaController(ctx)
+                    mediaController.setAnchorView(this)
+                    setMediaController(mediaController)
+
+                    // Inicia o vídeo imediatamente ao concluir o carregamento inicial
+                    setOnPreparedListener { mediaPlayer ->
+                        mediaPlayer.isLooping = false
+                        start()
+                    }
+
+                    // GATILHO: Quando o vídeo termina de tocar, chama a função de pontuação
+                    setOnCompletionListener {
+                        onVideoFinished()
+                    }
+
+                    // Evita falhas ou fechamentos inesperados se o link demorar a responder
+                    setOnErrorListener { _, _, _ ->
+                        Toast.makeText(ctx, "Erro de conexão ao carregar o vídeo do Karaokê.", Toast.LENGTH_LONG).show()
+                        onVideoFinished() // Mesmo com erro, envia para a tela de nota para não travar o app
+                        true
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+    }
+}
+
+@Composable
+fun ScoreScreen(score: Int, onRestart: () -> Unit) {
+    val feedbackMessage = remember(score) {
+        when {
+            score >= 95 -> "Nível Profissional! Uma verdadeira estrela! ⭐"
+            score >= 85 -> "Muito bom! Cantou com o coração! 👏"
+            score >= 75 -> "Mandou bem! Mas ainda pode melhorar. 🎤"
+            else -> "O importante é se divertir! Treine no chuveiro. 🚿"
+        }
+    }
+
+    val feedbackColor = remember(score) {
+        when {
+            score >= 90 -> Color(0xFF4CAF50) // Verde para desempenho fantástico
+            score >= 80 -> Color(0xFFFFC107) // Amarelo/Dourado para ótimo desempenho
+            else -> Color(0xFFFF5722)        // Vermelho/Laranja para incentivo
+        }
+    }
+
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0F0E17)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Text(
+                text = "SUA NOTA:",
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Light,
+                color = Color.LightGray
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = "$score",
+                fontSize = 110.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = feedbackColor
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Text(
+                text = feedbackMessage,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(horizontal = 24.dp)
+            )
+
+            Spacer(modifier = Modifier.height(48.dp))
+
+            Button(
+                onClick = onRestart,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63)),
+                modifier = Modifier
+                    .width(280.dp)
+                    .focusRequester(focusRequester) // Destaca o botão para acionamento direto via controle da TV Box
+            ) {
+                Text("Cantar Outra! 🔄", fontSize = 20.sp, color = Color.White)
+            }
+        }
+    }
+}
+
+fun buscarVideoPorNumero(context: Context, numeroDigitado: String): String? {
+    return try {
+        val inputStream = context.assets.open("musicas.txt")
+        val reader = BufferedReader(InputStreamReader(inputStream))
+        var linha: String?
+        var linkEncontrado: String? = null
+
+        while (reader.readLine().also { linha = it } != null) {
+            val partes = linha!!.split(",")
+            if (partes.isNotEmpty() && partes[0].trim() == numeroDigitado.trim()) {
+                linkEncontrado = partes[2].trim()
+                break
+            }
+        }
+        reader.close()
+        linkEncontrado
+    } catch (e: Exception) {
+        e.printStackTrace()
+        null
+    }
+}
