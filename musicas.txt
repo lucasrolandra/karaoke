@@ -1,4 +1,5 @@
-1010,Evidencias - Chitaozinho e Xororo,httpscdn.jsdelivr.netnpmbig-buck-bunny-1080pvideo.mp4
-1020,Eduardo e Monica - Legiao Urbana,httpswww.w3schools.comhtmlmov_bbb.mp4
-1030,Eduardo e Monica - Legiao Urbana,1030.mp4
+1010,Evidencias - Chitaozinho e Xororo,https://cdn.jsdelivr.netnpmbig-buck-bunny-1080pvideo.mp4
+1020,Eduardo e Monica - Legiao Urbana,https://upload.wikimedia.org/wikipedia/commons/transcoded/c/c0/Big_Buck_Bunny_4K.webm/Big_Buck_Bunny_4K.webm.360p.vp9.webm]
+1030,Ana Castela - Nosso Quadro,https://github.com/lucasrolandra/karaoke/raw/refs/heads/main/videos/1030.webm
 1040,Eduardo e Monica - Legiao Urbana,1040.mp4
+1050,Simone Mendes - Dois Tristes,https://github.com/lucasrolandra/karaoke/raw/refs/heads/main/videos/1050.webm
