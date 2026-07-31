@@ -1,0 +1,346 @@
+package com.example.karaoke
+
+import android.content.Context
+import android.os.Bundle
+import android.widget.Toast
+import android.widget.VideoView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.compose.animation.*
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import java.io.BufferedReader
+import java.io.File
+import java.io.InputStreamReader
+import androidx.annotation.OptIn
+import androidx.media3.common.MediaItem
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.PlayerView
+
+// Estados de navegação do App
+enum class Screen {
+    Search, Player, Score
+}
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MaterialTheme {
+                KaraokeTvScreen()
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalAnimationApi::class)
+@Composable
+fun KaraokeTvScreen() {
+    val context = LocalContext.current
+    var currentScreen by remember { mutableStateOf(Screen.Search) }
+    var videoPathToPlay by remember { mutableStateOf("") }
+    var ultimaNota by remember { mutableStateOf(0) }
+    var mensagemNota by remember { mutableStateOf("") }
+
+    val backgroundColor = Color(0xFF121214)
+    val primaryColor = Color(0xFFE91E63)
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(backgroundColor),
+        contentAlignment = Alignment.Center
+    ) {
+        // Usando AnimatedContent para transições suaves entre telas
+        AnimatedContent(
+            targetState = currentScreen,
+            transitionSpec = {
+                fadeIn(animationSpec = tween(500)) with fadeOut(animationSpec = tween(500))
+            }
+        ) { screenState ->
+            when (screenState) {
+                Screen.Search -> {
+                    SearchScreen(
+                        primaryColor = primaryColor,
+                        onMusicFound = { path ->
+                            videoPathToPlay = path
+                            currentScreen = Screen.Player
+                        },
+                        onMusicNotFound = {
+                            Toast.makeText(context, "Música não encontrada!", Toast.LENGTH_LONG).show()
+                        }
+                    )
+                }
+                Screen.Player -> {
+                    BackHandler { currentScreen = Screen.Search }
+                    VideoPlayerScreen(
+                        videoPath = videoPathToPlay,
+                        onVideoFinished = {
+                            // Sorteia nota (70 a 100)
+                            ultimaNota = (70..100).random()
+                            mensagemNota = when {
+                                ultimaNota == 100 -> "PERFEITO!!! VOCÊ É UM DEUS DO CANTO! 🌟👑🏆"
+                                ultimaNota >= 95 -> "Incrível! Super Popstar! 🌟🎤"
+                                ultimaNota >= 85 -> "Show de bola! Cantou muito! 🏆"
+                                else -> "Mandou bem! Dá para melhorar. 🎤"
+                            }
+                            currentScreen = Screen.Score
+                        }
+                    )
+                }
+                Screen.Score -> {
+                    BackHandler { currentScreen = Screen.Search }
+                    // Chamando a nova tela de nota animada
+                    ScoreScreenAnimated(
+                        nota = ultimaNota,
+                        mensagem = mensagemNota,
+                        primaryColor = primaryColor,
+                        onBackToSearch = { currentScreen = Screen.Search }
+                    )
+                }
+            }
+        }
+    }
+}
+
+// --- TELAS EXISTENTES (SEM MUDANÇAS MAJORITÁRIAS, APENAS AJUSTES VISUAIS) ---
+
+@Composable
+fun SearchScreen(primaryColor: Color, onMusicFound: (String) -> Unit, onMusicNotFound: () -> Unit) {
+    val context = LocalContext.current
+    var codigoMusica by remember { mutableStateOf("") }
+    val focusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+    fun executarBusca() {
+        if (codigoMusica.isNotBlank()) {
+            val path = buscarArquivoGenerico(context, codigoMusica, isVideo = true)
+            if (path != null) { onMusicFound(path); codigoMusica = "" }
+            else { onMusicNotFound() }
+        }
+    }
+
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center, modifier = Modifier.padding(24.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(text = "KARAOKÊ BOX", color = Color.White, fontSize = 42.sp, fontWeight = FontWeight.Bold)
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(text = "🎤", fontSize = 38.sp)
+        }
+        Spacer(modifier = Modifier.height(40.dp))
+        OutlinedTextField(
+            value = codigoMusica, onValueChange = { codigoMusica = it },
+            label = { Text("Código da Música (ex: 1030)", color = Color.Gray) },
+            colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = primaryColor, unfocusedBorderColor = Color.Gray, focusedLabelColor = primaryColor, focusedTextColor = Color.White, unfocusedTextColor = Color.White),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Go),
+            keyboardActions = KeyboardActions(onGo = { executarBusca() }),
+            modifier = Modifier.fillMaxWidth(0.8f).focusRequester(focusRequester)
+        )
+        Spacer(modifier = Modifier.height(24.dp))
+        Button(onClick = { executarBusca() }, colors = ButtonDefaults.buttonColors(containerColor = primaryColor), modifier = Modifier.fillMaxWidth(0.5f).height(48.dp)) {
+            Text("Cantar!", fontSize = 18.sp, color = Color.White)
+        }
+    }
+}
+
+@Composable
+fun VideoPlayerScreen(videoPath: String, onVideoFinished: () -> Unit) {
+    val context = LocalContext.current
+
+    val exoPlayer = remember {
+        ExoPlayer.Builder(context).build().apply {
+            val mediaItem = MediaItem.fromUri(videoPath)
+            setMediaItem(mediaItem)
+            prepare()
+            playWhenReady = true
+
+            addListener(object : androidx.media3.common.Player.Listener {
+                override fun onPlaybackStateChanged(playbackState: Int) {
+                    if (playbackState == androidx.media3.common.Player.STATE_ENDED) {
+                        onVideoFinished()
+                    }
+                }
+            })
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { exoPlayer.release() }
+    }
+
+    Box(modifier = Modifier.fillMaxSize().background(Color.Black), contentAlignment = Alignment.Center) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    player = exoPlayer
+                    useController = false
+                }
+            }
+        )
+    }
+}
+
+
+// --- NOVIDADE: TELA DE NOTA COM VÍDEO DE CELEBRAÇÃO ---
+
+@Composable
+fun ScoreScreenAnimated(
+    nota: Int,
+    mensagem: String,
+    primaryColor: Color,
+    onBackToSearch: () -> Unit
+) {
+    val context = LocalContext.current
+    // Estado para controlar se o vídeo de comemoração já acabou
+    var celebracaoFinalizada by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
+
+    // Define qual vídeo tocar baseado na nota
+    val nomeVideoCelebracao = if (nota == 100) "nota_100.mp4" else "celebracao_geral.mp4"
+    // Busca o caminho do vídeo no pendrive
+    val pathVideoCelebracao = remember { buscarArquivoGenerico(context, nomeVideoCelebracao, isVideo = false) }
+
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+
+        // FASE 1: Mostra o Vídeo de Comemoração
+        if (!celebracaoFinalizada && pathVideoCelebracao != null) {
+            VideoPlayerScreen(
+                videoPath = pathVideoCelebracao,
+                onVideoFinished = { celebracaoFinalizada = true } // Quando o vídeo acaba, muda o estado
+            )
+        }
+
+        // FASE 2: O vídeo acabou (ou não existe), mostra a nota com animação
+        if (celebracaoFinalizada || pathVideoCelebracao == null) {
+
+            // Garante o foco no botão para o controle remoto da TV
+            LaunchedEffect(Unit) { focusRequester.requestFocus() }
+
+            // Animação de entrada para os textos e botão
+            AnimatedVisibility(
+                visible = true,
+                enter = fadeIn(tween(1000)) + expandVertically(tween(1000))
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                    modifier = Modifier.padding(24.dp)
+                ) {
+                    // Se for nota 100, coloca um visual especial dourado
+                    val corNota = if (nota == 100) Color(0xFFFFD700) else Color(0xFFFF5722)
+
+                    Text(text = "SUA NOTA:", color = Color.LightGray, fontSize = 24.sp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "$nota",
+                        color = corNota,
+                        fontSize = 110.sp, // Aumentei um pouco
+                        fontWeight = FontWeight.Black
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    Text(
+                        text = mensagem,
+                        color = Color.White,
+                        fontSize = 24.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 16.dp)
+                    )
+                    Spacer(modifier = Modifier.height(48.dp))
+                    Button(
+                        onClick = onBackToSearch,
+                        colors = ButtonDefaults.buttonColors(containerColor = primaryColor),
+                        modifier = Modifier.focusRequester(focusRequester).height(50.dp)
+                    ) {
+                        Text("Cantar Outra! 🔄", fontSize = 18.sp, color = Color.White)
+                    }
+                }
+            }
+        }
+    }
+}
+
+// --- FUNÇÃO DE BUSCA ATUALIZADA E GENÉRICA ---
+
+// Função genérica que busca tanto vídeos de música (pelo código)
+// quanto vídeos do sistema (pelo nome do arquivo) no pendrive.
+// Agora ele busca link de vídeo, caso tenha http ou https
+fun buscarArquivoGenerico(context: Context, identificador: String, isVideo: Boolean): String? {
+    try {
+        val locaisDeArmazenamento = context.getExternalFilesDirs(null)
+
+        // Se for vídeo de música, precisa ler o txt primeiro
+        if (isVideo) {
+            var inputStream: java.io.InputStream? = null
+            var nomeOuUrlDoArquivo: String? = null
+
+            for (local in locaisDeArmazenamento) {
+                if (local != null) {
+                    val txtNoArmazenamento = File(local, "musicas.txt")
+                    if (txtNoArmazenamento.exists()) {
+                        inputStream = txtNoArmazenamento.inputStream()
+                    }
+                }
+            }
+
+            if (inputStream == null) { inputStream = context.assets.open("musicas.txt") }
+
+            val reader = BufferedReader(InputStreamReader(inputStream))
+            var javaLinha: String?
+            while (reader.readLine().also { javaLinha = it } != null) {
+                val partes = javaLinha!!.split(",")
+                // Busca pelo código (identificador)
+                if (partes.size >= 3 && partes[0].trim() == identificador.trim()) {
+                    nomeOuUrlDoArquivo = partes[2].trim()
+                    break
+                }
+            }
+            reader.close()
+
+            // REGRA DA INTERNET: Se o caminho for um link HTTP/HTTPS, ignora o pendrive e retorna a URL
+            if (nomeOuUrlDoArquivo != null && (nomeOuUrlDoArquivo.startsWith("http://") || nomeOuUrlDoArquivo.startsWith("https://"))) {
+                return nomeOuUrlDoArquivo
+            }
+
+            // Se não for link, continua procurando o arquivo mp4 físico nas pastas do pendrive
+            if (nomeOuUrlDoArquivo != null) {
+                for (local in locaisDeArmazenamento) {
+                    if (local != null) {
+                        val arquivoDeVideo = File(local, nomeOuUrlDoArquivo)
+                        if (arquivoDeVideo.exists()) return arquivoDeVideo.absolutePath
+                    }
+                }
+            }
+        } else {
+            // Se NÃO for vídeo de música (ex: celebracao.mp4), procura direto pelo nome
+            for (local in locaisDeArmazenamento) {
+                if (local != null) {
+                    val arquivoSistema = File(local, identificador)
+                    if (arquivoSistema.exists()) return arquivoSistema.absolutePath
+                }
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+    return null
+}
